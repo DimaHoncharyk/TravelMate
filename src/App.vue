@@ -9,7 +9,7 @@ import AssistantView from "./views/AssistantView.vue";
 
 import { useTrips } from "./composables/useTrips.js";
 import { useSavedPlaces } from "./composables/useSavedPlaces.js";
-import { demoPlaces, parisPlaces } from "./data/demo.js";
+import { demoPlaces, parisPlaces, berlinPlaces } from "./data/demo.js";
 import { generateTripDays } from "./services/tripGenerator.js";
 
 const pages = [
@@ -66,6 +66,14 @@ const popularPlaces = computed(() => {
 
   if (city.includes("париж") || city.includes("paris")) {
     return parisPlaces.slice(0, 3);
+  }
+
+  if (
+    city.includes("берлін") ||
+    city.includes("берлин") ||
+    city.includes("berlin")
+  ) {
+    return berlinPlaces.slice(0, 3);
   }
 
   return demoPlaces.slice(0, 3);
@@ -191,18 +199,22 @@ function toggleSaved(place) {
 }
 
 function placeMatchesTrip(place, trip) {
-  const destination = trip.destination.toLowerCase();
+  const city = trip.destination.toLowerCase();
 
-  if (destination.includes("париж") || destination.includes("paris")) {
+  if (city.includes("париж") || city.includes("paris")) {
     return parisPlaces.some((item) => item.id === place.id);
   }
 
-  if (
-    destination.includes("рим") ||
-    destination.includes("rome") ||
-    destination.includes("roma")
-  ) {
+  if (city.includes("рим") || city.includes("rome") || city.includes("roma")) {
     return demoPlaces.some((item) => item.id === place.id);
+  }
+
+  if (
+    city.includes("берлін") ||
+    city.includes("берлин") ||
+    city.includes("berlin")
+  ) {
+    return berlinPlaces.some((item) => item.id === place.id);
   }
 
   return false;
