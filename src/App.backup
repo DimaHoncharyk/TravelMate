@@ -1,0 +1,547 @@
+
+<script setup>
+import { computed, onMounted, ref, watch } from 'vue'
+import BaseButton from './components/BaseButton.vue'
+import BaseInput from './components/BaseInput.vue'
+import PlaceCard from './components/PlaceCard.vue'
+import TripCard from './components/TripCard.vue'
+import { demoPlaces } from './data/demo.js'
+
+const pages = [
+  { id: 'home', label: 'Огляд' },
+  { id: 'create', label: 'Нова подорож' },
+  { id: 'route', label: 'Мій маршрут' },
+  { id: 'saved', label: 'Збережені місця' },
+  { id: 'assistant', label: 'AI-помічник' },
+]
+
+const page = ref('home')
+const trips = ref([])
+const savedPlaces = ref([])
+const selectedTripId = ref(null)
+const activeDay = ref(1)
+const mobileMenu = ref(false)
+const toast = ref('')
+
+const form = ref({
+  destination: 'Рим, Італія',
+  startDate: '',
+  endDate: '',
+  travelers: 2,
+  budget: 1000,
+  style: 'Культура та гастрономія',
+  interests: ['Архітектура', 'Історія', 'Гастрономія'],
+})
+
+const interestOptions = [
+  'Архітектура',
+  'Історія',
+  'Гастрономія',
+  'Музеї',
+  'Природа',
+  'Шопінг',
+  'Активний відпочинок',
+]
+
+const selectedTrip = computed(
+  () => trips.value.find(t => t.id === selectedTripId.value) || null,
+)
+
+const currentDay = computed(
+  () => selectedTrip.value?.days.find(d => d.day === activeDay.value) || null,
+)
+
+const routeCost = computed(
+  () => currentDay.value?.places.reduce((sum, p) => sum + p.cost, 0) || 0,
+)
+
+function notify(message) {
+  toast.value = message
+  setTimeout(() => {
+    toast.value = ''
+  }, 2500)
+}
+
+function persist() {
+  localStorage.setItem('travelmate-trips', JSON.stringify(trips.value))
+  localStorage.setItem('travelmate-saved', JSON.stringify(savedPlaces.value))
+}
+
+function navigate(id) {
+  page.value = id
+  mobileMenu.value = false
+}
+
+function toggleInterest(interest) {
+  const interests = form.value.interests
+  form.value.interests = interests.includes(interest)
+    ? interests.filter(item => item !== interest)
+    : [...interests, interest]
+}
+
+function createTrip() {
+  if (!form.value.destination.trim()) {
+    notify('Вкажіть місто призначення.')
+    return
+  }
+
+  if (form.value.startDate && form.value.endDate &&
+      form.value.endDate < form.value.startDate) {
+    notify('Дата завершення не може бути раніше дати початку.')
+    return
+  }
+
+  const numberOfDays = form.value.startDate && form.value.endDate
+    ? Math.min(
+        14,
+        Math.max(
+          1,
+          Math.floor(
+            (new Date(form.value.endDate) - new Date(form.value.startDate)) /
+              86400000,
+          ) + 1,
+        ),
+      )
+    : 5
+
+  const trip = {
+    id: Date.now(),
+    destination: form.value.destination.trim(),
+    travelers: Number(form.value.travelers),
+    budget: Number(form.value.budget),
+    style: form.value.style,
+    startDate: form.value.startDate,
+    endDate: form.value.endDate,
+    interests: [...form.value.interests],
+    days: Array.from({ length: numberOfDays }, (_, i) => ({
+      day: i + 1,
+      title: ['Історичний центр', 'Культура та мистецтво', 'Місцеві враження'][i % 3],
+      places: demoPlaces.map(place => ({ ...place })),
+    })),
+  }
+
+  trips.value.unshift(trip)
+  selectedTripId.value = trip.id
+  activeDay.value = 1
+  persist()
+  navigate('route')
+  notify('Подорож створено!')
+}
+
+function openTrip(trip) {
+  selectedTripId.value = trip.id
+  activeDay.value = 1
+  navigate('route')
+}
+
+function isSaved(place) {
+  return savedPlaces.value.some(p => p.id === place.id)
+}
+
+function toggleSaved(place) {
+  savedPlaces.value = isSaved(place)
+    ? savedPlaces.value.filter(p => p.id !== place.id)
+    : [...savedPlaces.value, { ...place }]
+
+  persist()
+  notify(isSaved(place) ? 'Місце збережено.' : 'Місце видалено зі збережених.')
+}
+
+function addToTrip(place) {
+  if (!selectedTrip.value) {
+    notify('Спочатку створіть подорож.')
+    navigate('create')
+    return
+  }
+
+  if (!currentDay.value.places.some(p => p.id === place.id)) {
+    currentDay.value.places.push({ ...place })
+    persist()
+    notify('Місце додано до маршруту.')
+  } else {
+    notify('Це місце вже є в маршруті.')
+  }
+
+  navigate('route')
+}
+
+function removeFromRoute(placeId) {
+  if (!currentDay.value) return
+  currentDay.value.places = currentDay.value.places.filter(p => p.id !== placeId)
+  persist()
+  notify('Місце видалено з маршруту.')
+}
+
+const question = ref('')
+const messages = ref([
+  {
+    role: 'assistant',
+    text: 'Привіт! Запитай мене про маршрут, бюджет або цікаві місця.',
+  },
+])
+
+function sendQuestion() {
+  const text = question.value.trim()
+  if (!text) return
+
+  messages.value.push({ role: 'user', text })
+  question.value = ''
+
+  const q = text.toLowerCase()
+  let answer
+
+  if (q.includes('бюджет') || q.includes('дешев')) {
+    answer = 'Для економії додай безкоштовні площі й парки, перевір ціни на квитки та заздалегідь сплануй витрати на харчування.'
+  } else if (q.includes('ресторан') || q.includes('їсти') || q.includes('вечер')) {
+    answer = 'Для знайомства з місцевою кухнею можна розглянути район Трастевере. Перед візитом перевір актуальні ціни та години роботи.'
+  } else {
+    answer = `Почни з інтересів подорожі${selectedTrip.value ? ` до ${selectedTrip.value.destination}` : ''}. Групуй локації за районами, залишай час на дорогу й коригуй план відповідно до бюджету.`
+  }
+
+  messages.value.push({ role: 'assistant', text: answer })
+}
+
+onMounted(() => {
+  try {
+    trips.value = JSON.parse(localStorage.getItem('travelmate-trips') || '[]')
+    savedPlaces.value = JSON.parse(localStorage.getItem('travelmate-saved') || '[]')
+  } catch {
+    trips.value = []
+    savedPlaces.value = []
+  }
+
+  selectedTripId.value = trips.value[0]?.id ?? null
+
+  if (!trips.value.length) {
+    const sample = {
+      id: 1,
+      destination: 'Рим, Італія',
+      travelers: 2,
+      budget: 1000,
+      style: 'Культура та гастрономія',
+      interests: ['Архітектура', 'Історія', 'Гастрономія'],
+      days: Array.from({ length: 5 }, (_, i) => ({
+        day: i + 1,
+        title: ['Історичний центр', 'Культура та мистецтво', 'Місцеві враження'][i % 3],
+        places: demoPlaces.map(place => ({ ...place })),
+      })),
+    }
+
+    trips.value = [sample]
+    selectedTripId.value = sample.id
+    persist()
+  }
+})
+
+watch([trips, savedPlaces], persist, { deep: true })
+</script>
+
+<template>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#home" @click.prevent="navigate('home')">
+        <span class="brand-icon">T</span>
+        Travel<span>Mate</span>
+      </a>
+
+      <button
+        class="menu-toggle"
+        type="button"
+        aria-label="Відкрити або закрити меню"
+        :aria-expanded="mobileMenu"
+        @click="mobileMenu = !mobileMenu"
+      >
+        ☰
+      </button>
+
+      <nav class="navigation" :class="{ 'navigation-open': mobileMenu }" aria-label="Основна навігація">
+        <button
+          v-for="item in pages"
+          :key="item.id"
+          type="button"
+          :class="{ 'nav-active': page === item.id }"
+          :aria-current="page === item.id ? 'page' : undefined"
+          @click="navigate(item.id)"
+        >
+          {{ item.label }}
+        </button>
+      </nav>
+    </header>
+
+    <main class="main-content">
+      <section v-if="page === 'home'" class="screen">
+        <div class="hero">
+          <div>
+            <span class="eyebrow">ТВІЙ ПЕРСОНАЛЬНИЙ ПОМІЧНИК</span>
+            <h1>Світ чекає.<br><span>Плануй свою пригоду.</span></h1>
+            <p>Створюй персональні маршрути, знаходь цікаві місця та плануй бюджет подорожі в одному місці.</p>
+            <BaseButton @click="navigate('create')">Створити подорож →</BaseButton>
+          </div>
+          <div class="hero-illustration" role="img" aria-label="Ілюстрація подорожі">
+            <span>✈</span>
+            <strong>EXPLORE<br>THE WORLD</strong>
+            <div class="illustration-sun"></div>
+          </div>
+        </div>
+
+        <div class="section-title">
+          <div>
+            <h2>Твої подорожі</h2>
+            <p>Повернися до планування в будь-який момент.</p>
+          </div>
+          <BaseButton variant="secondary" @click="navigate('create')">＋ Нова подорож</BaseButton>
+        </div>
+
+        <div class="trip-grid">
+          <TripCard
+            v-for="trip in trips"
+            :key="trip.id"
+            :trip="trip"
+            @open="openTrip"
+          />
+        </div>
+
+        <div class="section-title">
+          <div>
+            <h2>Популярні місця</h2>
+            <p>Ідеї для твого наступного маршруту.</p>
+          </div>
+        </div>
+
+        <div class="place-grid">
+          <PlaceCard
+            v-for="place in demoPlaces.slice(0, 3)"
+            :key="place.id"
+            :place="place"
+            :saved="isSaved(place)"
+            @toggle-save="toggleSaved"
+            @add-to-trip="addToTrip"
+          />
+        </div>
+      </section>
+
+      <section v-else-if="page === 'create'" class="screen form-screen">
+        <span class="eyebrow">НОВА ПОДОРОЖ</span>
+        <h1>Створи свою <span>пригоду</span></h1>
+        <p class="muted">Вкажи основні параметри, щоб отримати демонстраційний маршрут.</p>
+
+        <form class="panel" @submit.prevent="createTrip">
+          <h2>Куди вирушаємо?</h2>
+
+          <BaseInput
+            id="destination"
+            v-model="form.destination"
+            label="Місто або країна"
+            placeholder="Наприклад, Рим, Італія"
+            required
+          />
+
+          <div class="two-columns">
+            <BaseInput
+              id="start-date"
+              v-model="form.startDate"
+              label="Дата початку"
+              type="date"
+            />
+            <BaseInput
+              id="end-date"
+              v-model="form.endDate"
+              label="Дата завершення"
+              type="date"
+            />
+          </div>
+
+          <div class="two-columns">
+            <BaseInput
+              id="travelers"
+              v-model="form.travelers"
+              label="Кількість мандрівників"
+              type="number"
+              required
+            />
+            <BaseInput
+              id="budget"
+              v-model="form.budget"
+              label="Бюджет у євро"
+              type="number"
+              required
+            />
+          </div>
+
+          <label class="field-label" for="travel-style">Стиль подорожі</label>
+          <select id="travel-style" v-model="form.style" class="field-input">
+            <option>Культура та гастрономія</option>
+            <option>Пригоди та активний відпочинок</option>
+            <option>Спокійний відпочинок</option>
+            <option>Море та пляжі</option>
+          </select>
+
+          <h2 class="form-subtitle">Що тебе цікавить?</h2>
+          <div class="interest-list">
+            <button
+              v-for="interest in interestOptions"
+              :key="interest"
+              type="button"
+              class="interest-chip"
+              :class="{ selected: form.interests.includes(interest) }"
+              :aria-pressed="form.interests.includes(interest)"
+              @click="toggleInterest(interest)"
+            >
+              {{ form.interests.includes(interest) ? '✓ ' : '+ ' }}{{ interest }}
+            </button>
+          </div>
+
+          <BaseButton type="submit">Створити маршрут →</BaseButton>
+        </form>
+      </section>
+
+      <section v-else-if="page === 'route'" class="screen">
+        <template v-if="selectedTrip">
+          <span class="eyebrow">ТВОЯ ПОДОРОЖ</span>
+          <h1>{{ selectedTrip.destination }}</h1>
+          <p class="muted">
+            {{ selectedTrip.style }} · {{ selectedTrip.travelers }} мандрівники · €{{ selectedTrip.budget }}
+          </p>
+
+          <div class="route-layout">
+            <div>
+              <div class="day-list">
+                <button
+                  v-for="day in selectedTrip.days"
+                  :key="day.day"
+                  type="button"
+                  :class="{ 'day-active': activeDay === day.day }"
+                  @click="activeDay = day.day"
+                >
+                  День {{ day.day }}
+                </button>
+              </div>
+
+              <h2>{{ currentDay?.title }}</h2>
+
+              <article
+                v-for="(place, index) in currentDay?.places || []"
+                :key="`${place.id}-${index}`"
+                class="route-place"
+              >
+                <span class="route-number">{{ index + 1 }}</span>
+                <span class="route-emoji" aria-hidden="true">{{ place.emoji }}</span>
+                <div class="route-info">
+                  <strong>{{ place.name }}</strong>
+                  <span>{{ place.category }} · €{{ place.cost }}</span>
+                  <p>{{ place.description }}</p>
+                </div>
+                <button
+                  class="remove-button"
+                  type="button"
+                  :aria-label="`Видалити ${place.name} з маршруту`"
+                  @click="removeFromRoute(place.id)"
+                >
+                  ×
+                </button>
+              </article>
+
+              <p v-if="!currentDay?.places.length" class="muted">
+                У цей день поки немає місць. Додай їх зі збережених.
+              </p>
+
+              <BaseButton variant="secondary" @click="navigate('saved')">
+                Додати збережене місце
+              </BaseButton>
+            </div>
+
+            <aside class="route-aside">
+              <h2>Карта маршруту</h2>
+              <div class="map-demo" role="img" aria-label="Схематичне розташування точок маршруту">
+                <span class="map-point point-a">1</span>
+                <span class="map-point point-b">2</span>
+                <span class="map-point point-c">3</span>
+                <span class="map-label">Схематична карта</span>
+              </div>
+
+              <div class="budget-panel">
+                <h3>Бюджет</h3>
+                <strong>€{{ selectedTrip.budget }}</strong>
+                <p>Орієнтовні витрати на місця поточного дня: €{{ routeCost }}</p>
+                <div class="progress-track">
+                  <span :style="{ width: `${Math.min(100, routeCost / Math.max(1, selectedTrip.budget) * 100)}%` }"></span>
+                </div>
+              </div>
+
+              <BaseButton variant="secondary" @click="navigate('assistant')">
+                Запитати AI-помічника
+              </BaseButton>
+            </aside>
+          </div>
+        </template>
+
+        <div v-else class="panel">
+          <h2>Подорож ще не створена</h2>
+          <BaseButton @click="navigate('create')">Створити подорож</BaseButton>
+        </div>
+      </section>
+
+      <section v-else-if="page === 'saved'" class="screen">
+        <span class="eyebrow">ТВОЯ КОЛЕКЦІЯ</span>
+        <h1>Збережені <span>місця</span></h1>
+        <p class="muted">Збирай цікаві локації та додавай їх до маршруту.</p>
+
+        <div v-if="savedPlaces.length" class="place-grid">
+          <PlaceCard
+            v-for="place in savedPlaces"
+            :key="place.id"
+            :place="place"
+            :saved="true"
+            @toggle-save="toggleSaved"
+            @add-to-trip="addToTrip"
+          />
+        </div>
+
+        <div v-else class="empty-panel">
+          <span>♡</span>
+          <h2>Тут поки порожньо</h2>
+          <p>Збережи місце на головній сторінці, щоб воно з'явилося тут.</p>
+          <BaseButton @click="navigate('home')">Знайти місця</BaseButton>
+        </div>
+      </section>
+
+      <section v-else-if="page === 'assistant'" class="screen assistant-screen">
+        <span class="eyebrow">TRAVELMATE ASSISTANT</span>
+        <h1>Твій помічник у <span>подорожах</span></h1>
+        <p class="muted">Демонстраційний чат для запитань про бюджет, маршрут і місця.</p>
+
+        <div class="chat-panel">
+          <div class="chat-messages" aria-live="polite">
+            <article
+              v-for="(message, index) in messages"
+              :key="index"
+              class="chat-message"
+              :class="message.role"
+            >
+              <strong>{{ message.role === 'assistant' ? 'TravelMate' : 'Ти' }}</strong>
+              <p>{{ message.text }}</p>
+            </article>
+          </div>
+
+          <form class="chat-form" @submit.prevent="sendQuestion">
+            <label class="visually-hidden" for="question">Твоє запитання</label>
+            <input
+              id="question"
+              v-model="question"
+              class="field-input"
+              placeholder="Наприклад, як зменшити бюджет?"
+            >
+            <BaseButton type="submit" :disabled="!question.trim()">Надіслати</BaseButton>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>TravelMate · 2026</span>
+      <span>Твоя наступна пригода починається тут.</span>
+    </footer>
+
+    <div v-if="toast" class="toast" role="status">{{ toast }}</div>
+  </div>
+</template>
